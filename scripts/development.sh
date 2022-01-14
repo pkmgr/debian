@@ -119,8 +119,9 @@ if ! builtin type -P systemmgr &>/dev/null; then
   run_external /usr/local/share/CasjaysDev/scripts/install.sh
   run_external systemmgr --config &>/dev/null
   run_external systemmgr install scripts
-  run_external "apt clean all"
+  run_update
 fi
+printf_green "Installer has been initialized"
 
 ##################################################################################################################
 printf_head "Disabling selinux"
@@ -138,7 +139,11 @@ if [ -f /etc/makepkg.conf ]; then
     sed -i 's/COMPRESSXZ=(xz -c -z -)/COMPRESSXZ=(xz -c -T '"$numberofcores"' -z -)/g' /etc/makepkg.conf
   fi
 fi
+##################################################################################################################
+printf_head "Grabbing ssh key from github"
+##################################################################################################################
 ssh_key
+
 ##################################################################################################################
 printf_head "Configuring the system"
 ##################################################################################################################
