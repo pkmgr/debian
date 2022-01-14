@@ -8,7 +8,7 @@
 # @Copyright     : Copyright: (c) 2021 Jason Hempstead, Casjays Developments
 # @Created       : Thursday, Nov 04, 2021 16:59 EDT
 # @File          : server.sh
-# @Description   : server installer for ubuntu
+# @Description   : server installer for debian
 # @TODO          :
 # @Other         :
 # @Resource      :
@@ -83,7 +83,7 @@ ssh_key() { save_remote_file "https://github.com/casjay.keys" "/root/.ssh/author
 run_external() { printf_green "Executing $*" && eval "$*" >/dev/null 2>&1 || return 1; }
 grab_remote_file() { urlverify "$1" && curl -q -SLs "$1" || exit 1; }
 save_remote_file() { urlverify "$1" && curl -q -SLs "$1" | tee "$2" &>/dev/null || exit 1; }
-retrieve_version_file() { grab_remote_file "https://github.com/casjay-base/ubuntu/raw/main/version.txt" | head -n1 || echo "Unknown version"; }
+retrieve_version_file() { grab_remote_file "https://github.com/casjay-base/debian/raw/main/version.txt" | head -n1 || echo "Unknown version"; }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 run_grub() {
   printf_green "Setting up grub"
