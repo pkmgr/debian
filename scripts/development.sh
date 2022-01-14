@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
-
-SCRIPTNAME="$(basename $0)"
-SCRIPTDIR="$(dirname "${BASH_SOURCE[0]}")"
-
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-# @Author      : Jason
-# @Contact     : casjaysdev@casjay.net
-# @File        : developments.sh
-# @Created     : Mon, Dec 31, 2019, 00:00 EST
-# @License     : WTFPL
-# @Copyright   : Copyright (c) CasjaysDev
-# @Description : developments on debian
-# @Resource    :
+##@Version       : 202111041659-git
+# @Author        : Jason Hempstead
+# @Contact       : jason@casjaysdev.com
+# @License       : WTFPL
+# @ReadME        : server.sh --help
+# @Copyright     : Copyright: (c) 2021 Jason Hempstead, Casjays Developments
+# @Created       : Thursday, Nov 04, 2021 16:59 EDT
+# @File          : server.sh
+# @Description   : server installer for ubuntu
+# @TODO          :
+# @Other         :
+# @Resource      :
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
+APPNAME="$(basename "$0")"
+VERSION="202111041659-git"
+USER="${SUDO_USER:-${USER}}"
+HOME="${USER_HOME:-${HOME}}"
+SRC_DIR="${BASH_SOURCE%/*}"
+SCRIPT_DESCRIBE="server"
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Set bash options
+if [[ "$1" == "--debug" ]]; then shift 1 && set -xo pipefail && export SCRIPT_OPTS="--debug" && export _DEBUG="on"; fi
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Set functions
-
 SCRIPTSFUNCTURL="${SCRIPTSFUNCTURL:-https://github.com/casjay-dotfiles/scripts/raw/main/functions}"
 SCRIPTSFUNCTDIR="${SCRIPTSFUNCTDIR:-/usr/local/share/CasjaysDev/scripts}"
 SCRIPTSFUNCTFILE="${SCRIPTSFUNCTFILE:-system-installer.bash}"
-
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
 if [ -f "../functions/$SCRIPTSFUNCTFILE" ]; then
   . "../functions/$SCRIPTSFUNCTFILE"
 elif [ -f "$SCRIPTSFUNCTDIR/functions/$SCRIPTSFUNCTFILE" ]; then
@@ -30,77 +36,139 @@ else
   curl -LSs "$SCRIPTSFUNCTURL/$SCRIPTSFUNCTFILE" -o "/tmp/$SCRIPTSFUNCTFILE" || exit 1
   . "/tmp/$SCRIPTSFUNCTFILE"
 fi
-
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-run_post() {
-  local e="$1"
-  local m="$(echo $1 | sed 's#devnull ##g')"
-  execute "$e" "executing: $m"
-  setexitstatus
-  set --
-}
-system_service_exists() {
-  if sudo systemctl list-units --full -all | grep -Fq "$1"; then return 0; else return 1; fi
-  setexitstatus
-  set --
-}
-system_service_enable() {
-  if system_service_exists $1; then execute "sudo systemctl enable -f $1" "Enabling service: $1"; fi
-  setexitstatus
-  set --
-}
-system_service_disable() {
-  if system_service_exists $1; then execute "sudo systemctl disable --now $1" "Disabling service: $1"; fi
-  setexitstatus
-  set --
-}
-
+[[ "$1" == "--help" ]] && printf_exit "${GREEN}apache installer for centos/rhel"
+cat /etc/*-release | grep 'ID_LIKE=' | grep -E 'rhel|centos' &>/dev/null && true || printf_exit "This installer is meant to be run on a CentOS based system"
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+system_service_exists() { systemctl status "$1" 2>&1 | grep -iq "$1" && return 0 || return 1; }
+system_service_enable() { systemctl status "$1" 2>&1 | grep -iq 'inactive' && execute "systemctl enable $1" "Enabling service: $1" || return 1; }
+system_service_disable() { systemctl status "$1" 2>&1 | grep -iq 'active' && execute "systemctl disable --now $1" "Disabling service: $1" || return 1; }
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 test_pkg() {
   devnull sudo dpkg-query -l "$1" && printf_success "$1 is installed" && return 0 || return 1
   setexitstatus
   set --
 }
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 remove_pkg() {
-  if test_pkg "$1"; then execute "sudo pkmgr remove $1" "Removing: $1"; fi
+  if test_pkg "$1"; then execute "sudo apt-get remove $1" "Removing: $1"; fi
   setexitstatus
   set --
 }
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 install_pkg() {
-  if ! test_pkg "$1"; then execute "sudo pkmgr install $1" "Installing: $1"; fi
+  if ! test_pkg "$1"; then execute "sudo apt-get install $1" "Installing: $1"; fi
   setexitstatus
   set --
 }
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-[ ! -z "$1" ] && printf_exit 'To many options provided'
-
+detect_selinux() {
+  builtin command -v selinuxenabled &>/dev/null && selinuxenabled
+  if [ $? -ne 0 ]; then return 0; else return 1; fi
+}
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+disable_selinux() {
+  if builtin command -v selinuxenabled &>/dev/null && selinuxenabled; then
+    printf_blue "Disabling selinux"
+    devnull setenforce 0
+  else
+    printf_green "selinux is already disabled"
+  fi
+}
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+ssh_key() { save_remote_file "https://github.com/casjay.keys" "/root/.ssh/authorized_keys"; }
+run_external() { printf_green "Executing $*" && eval "$*" >/dev/null 2>&1 || return 1; }
+grab_remote_file() { urlverify "$1" && curl -q -SLs "$1" || exit 1; }
+save_remote_file() { urlverify "$1" && curl -q -SLs "$1" | tee "$2" &>/dev/null || exit 1; }
+retrieve_version_file() { grab_remote_file "https://github.com/casjay-base/ubuntu/raw/main/version.txt" | head -n1 || echo "Unknown version"; }
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+run_grub() {
+  printf_green "Setting up grub"
+  rm -Rf /boot/*rescue*
+  devnull grub2-mkconfig -o /boot/grub2/grub.cfg
+}
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+run_post() {
+  local e="$*"
+  local m="${e//devnull /}"
+  execute "$e" "executing: $m"
+  setexitstatus
+  set --
+}
+##################################################################################################################
+clear
+ARGS="$*" && shift $#
+##################################################################################################################
+printf_head "Initializing the installer"
+##################################################################################################################
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+if [ -f /etc/casjaysdev/updates/versions/default.txt ]; then
+  printf_red "This has already been installed"
+  printf_red "To reinstall please remove the version file in"
+  printf_exit "/etc/casjaysdev/updates/versions/default.txt"
+fi
+if ! builtin type -P systemmgr &>/dev/null; then
+  if [[ -d "/usr/local/share/CasjaysDev/scripts" ]]; then
+    run_external "git -C https://github.com/casjay-dotfiles/scripts pull"
+  else
+    run_external "git clone https://github.com/casjay-dotfiles/scripts /usr/local/share/CasjaysDev/scripts"
+  fi
+  run_external /usr/local/share/CasjaysDev/scripts/install.sh
+  run_external systemmgr --config &>/dev/null
+  run_external systemmgr install scripts
+  run_external "apt clean all"
+fi
 
 ##################################################################################################################
-printf_head "Initializing the setup script"
+printf_head "Disabling selinux"
 ##################################################################################################################
-
-sudoask && sudoexit
-sudo pkmgr init
+disable_selinux
 
 ##################################################################################################################
 printf_head "Configuring cores for compiling"
 ##################################################################################################################
-
 numberofcores=$(grep -c ^processor /proc/cpuinfo)
-printf_info "Total cores avaliable: $numberofcores"
-
-#if [ $numberofcores -gt 1 ]; then
-#  sudo sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j'$(($numberofcores+1))'"/g' /etc/makepkg.conf;
-#  sudo sed -i 's/COMPRESSXZ=(xz -c -z -)/COMPRESSXZ=(xz -c -T '"$numberofcores"' -z -)/g' /etc/makepkg.conf
-#fi
+printf_yellow "Total cores avaliable: $numberofcores"
+if [ -f /etc/makepkg.conf ]; then
+  if [ $numberofcores -gt 1 ]; then
+    sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j'$(($numberofcores + 1))'"/g' /etc/makepkg.conf
+    sed -i 's/COMPRESSXZ=(xz -c -z -)/COMPRESSXZ=(xz -c -T '"$numberofcores"' -z -)/g' /etc/makepkg.conf
+  fi
+fi
+ssh_key
+##################################################################################################################
+printf_head "Configuring the system"
+##################################################################################################################
+run_external apt clean
+run_external apt update
+run_external apt upgrade -y
+install_pkg vnstat
+system_service_enable vnstat
+install_pkg net-tools
+install_pkg wget
+install_pkg curl
+install_pkg git
+install_pkg nail
+install_pkg e2fsprogs
+install_pkg redhat-lsb
+install_pkg neovim
+install_pkg unzip
+run_external rm -Rf /tmp/dotfiles
+run_external timedatectl set-timezone America/New_York
+install_pkg cronie-noanacron
+for rpms in echo cronie-anacron sendmail sendmail-cf; do
+  rpm -ev --nodeps $rpms &>/dev/null
+done
+run_external rm -Rf /root/anaconda-ks.cfg /var/log/anaconda
+run_external apt clean all
+run_external apt update
+run_external apt upgrade -y
+run_grub
 
 ##################################################################################################################
-printf_head "Installing desktop packages"
+printf_head "Installing the packages for $SCRIPT_DESCRIBE"
 ##################################################################################################################
-
 install_pkg adduser
 install_pkg adwaita-icon-theme
 install_pkg albatross-gtk-theme
@@ -782,7 +850,6 @@ run_post "dotfiles admin tor"
 ##################################################################################################################
 printf_head "Setting up services"
 ##################################################################################################################
-
 system_service_enable tor.service
 system_service_enable smbd.service
 system_service_enable nmbd.service
