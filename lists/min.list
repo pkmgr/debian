@@ -6,8 +6,8 @@ direnv
 figlet
 finch
 fish
-fortune-mod
 fortunes
+fortune-mod
 fortunes-off
 git
 gnupg
@@ -16,8 +16,6 @@ irssi
 lsb-release
 lsof
 mercurial
-mplayer
-mpv
 neofetch
 neomutt
 neovim
@@ -36,5 +34,4 @@ tor
 vifm
 vim
 wget
-xterm
 zsh
