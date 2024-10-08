@@ -81,11 +81,25 @@ disable_selinux() {
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ssh_key() {
-  local get_keys
-  get_keys="$(curl -q -LSsf "$SSH_KEY_LOCATION")"
-  echo "$get_keys" | while read -r key; do
-    grep -qs "$key" "$HOME/.ssh/authorized_keys" || echo "$key" >>"$HOME/.ssh/authorized_keys"
-  done
+  local ssh_key=""
+  [ -n "$SSH_KEY_LOCATION" ] || return 0
+  [ -d "$HOME/.ssh" ] || mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+  printf_green "Grabbing ssh key[s]: $GITHUB_USER for $USER"
+  get_keys="$(curl -q -LSsf "$SSH_KEY_LOCATION" 2>/dev/null | grep '^' || false)"
+  if [ -n "$get_keys" ]; then
+    echo "$get_keys" | while read -r key; do
+      if grep -qs "$key" "$HOME/.ssh/authorized_keys"; then
+        printf_cyan "${key:0:80} exists in ~/.ssh/authorized_keys"
+      else
+        echo "$ssh_key" | tee -a "/root/.ssh/authorized_keys" &>/dev/null
+        printf_green "Successfully added github ${key:0:80}"
+      fi
+    done
+  else
+    printf_return "Can not get key from $SSH_KEY_LOCATION"
+    return 1
+  fi
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 run_external() { printf_green "Executing $*" && eval "$*" >/dev/null 2>&1 || return 1; }
