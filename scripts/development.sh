@@ -21,6 +21,7 @@ SRC_DIR="${BASH_SOURCE%/*}"
 SCRIPT_DESCRIBE="server"
 SCRIPT_OS="debian"
 GITHUB_USER="${GITHUB_USER:-casjay}"
+SSH_KEY_LOCATION="${SSH_KEY_LOCATION:-https://github.com/$GITHUB_USER.keys}"
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Set bash options
 if [[ "$1" == "--debug" ]]; then shift 1 && set -xo pipefail && export SCRIPT_OPTS="--debug" && export _DEBUG="on"; fi
@@ -79,7 +80,14 @@ disable_selinux() {
   fi
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-ssh_key() { save_remote_file "https://github.com/casjay.keys" "/root/.ssh/authorized_keys"; }
+ssh_key() {
+  local get_keys
+  get_keys="$(curl -q -LSsf "$SSH_KEY_LOCATION")"
+  echo "$get_keys" | while read -r key; do
+    grep -qs "$key" "$HOME/.ssh/authorized_keys" || echo "$key" >>"$HOME/.ssh/authorized_keys"
+  done
+}
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 run_external() { printf_green "Executing $*" && eval "$*" >/dev/null 2>&1 || return 1; }
 grab_remote_file() { urlverify "$1" && curl -q -SLs "$1" || exit 1; }
 save_remote_file() { urlverify "$1" && curl -q -SLs "$1" | tee "$2" &>/dev/null || exit 1; }
