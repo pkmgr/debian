@@ -26,42 +26,146 @@ SSH_KEY_LOCATION="${SSH_KEY_LOCATION:-https://github.com/$GITHUB_USER.keys}"
 # Set bash options
 if [[ "$1" == "--debug" ]]; then shift 1 && set -xo pipefail && export SCRIPT_OPTS="--debug" && export _DEBUG="on"; fi
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-# Set functions
-SCRIPTSFUNCTURL="${SCRIPTSFUNCTURL:-https://github.com/casjay-dotfiles/scripts/raw/main/functions}"
-SCRIPTSFUNCTDIR="${SCRIPTSFUNCTDIR:-/usr/local/share/CasjaysDev/scripts}"
-SCRIPTSFUNCTFILE="${SCRIPTSFUNCTFILE:-system-installer.bash}"
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-if [ -f "../functions/$SCRIPTSFUNCTFILE" ]; then
-  . "../functions/$SCRIPTSFUNCTFILE"
-elif [ -f "$SCRIPTSFUNCTDIR/functions/$SCRIPTSFUNCTFILE" ]; then
-  . "$SCRIPTSFUNCTDIR/functions/$SCRIPTSFUNCTFILE"
+# Vendored from casjay-dotfiles/scripts system-installer.bash (self-contained,
+# no network fetch) - only the functions this script actually calls.
+if [ -n "${NO_COLOR+x}" ] || [ "$SHOW_RAW" = "true" ]; then
+  __printf_color() { printf '%b' "$1" | tr -d '\t'; }
 else
-  curl -LSs "$SCRIPTSFUNCTURL/$SCRIPTSFUNCTFILE" -o "/tmp/$SCRIPTSFUNCTFILE" || exit 1
-  . "/tmp/$SCRIPTSFUNCTFILE"
+  __printf_color() { printf "%b" "$(tput setaf "$2" 2>/dev/null)" "$1" "$(tput sgr0 2>/dev/null)"; }
 fi
+__printf_green() { __printf_color "$1\n" 2; }
+__printf_red() { __printf_color "$1\n" 208; }
+__printf_yellow() { __printf_color "$1\n" 3; }
+__printf_blue() { __printf_color "$1\n" 33; }
+__printf_cyan() { __printf_color "$1\n" 6; }
+__printf_success() { __printf_color "[ ✔ ] $1\n" 2; }
+__printf_exit() {
+  __printf_color "$1\n" 208 1>&2
+  exit 1
+}
+__printf_head() {
+  [[ $1 == ?(-)+([0-9]) ]] && local color="$1" && shift 1 || local color="6"
+  local msg="$*"
+  shift
+  __printf_color "
+##################################################
+$msg
+##################################################\n" "$color"
+}
+__printf_return() {
+  test -n "$1" && test -z "${1//[0-9]/}" && local color="$1" && shift 1 || local color="208"
+  test -n "$1" && test -z "${1//[0-9]/}" && local exitCode="$1" && shift 1 || local exitCode="1"
+  local msg="$*"
+  [ ${#msg} = 0 ] || { __printf_color "$msg" "$color" 1>&2 && printf "\n"; }
+  return ${exitCode:-2}
+}
+__printf_execute_success() { __printf_color "[ ✔ ] $1 \n" 2; }
+__printf_execute_error() { __printf_color "[ ✖ ] $1 $2 \n" 1; }
+__printf_execute_result() {
+  if [ "$1" -eq 0 ]; then __printf_execute_success "$2"; else __printf_execute_error "$2"; fi
+  return "$1"
+}
+__printf_execute_error_stream() { while read -r line; do __printf_execute_error "↳ ERROR: $line"; done; }
+__devnull() { "$@" >/dev/null 2>&1; }
+__urlcheck() { __devnull curl --output /dev/null --silent --head --fail "$1"; }
+__urlinvalid() {
+  if [ -z "$1" ]; then
+    __printf_red "Invalid URL\n"
+  else
+    __printf_red "Can't find $1\n"
+  fi
+  exit 1
+}
+__urlverify() { __urlcheck $1 || __urlinvalid $1; }
+__setexitstatus() {
+  EXIT="${EXIT:-$?}"
+  local EXITSTATUS+="$EXIT"
+  if [ -z "$EXITSTATUS" ] || [ "$EXITSTATUS" -ne 0 ]; then
+    BG_EXIT="${BG_RED}"
+    return 1
+  else
+    BG_EXIT="${BG_GREEN}"
+    return 0
+  fi
+}
+__set_trap() { trap -p "$1" | grep -- "$2" &>/dev/null || trap "$2" "$1"; }
+__execute() {
+  __kill_all_subprocesses() {
+    local i=""
+    for i in $(jobs -p); do
+      kill "$i"
+      wait "$i" &>/dev/null
+    done
+  }
+  __show_spinner() {
+    local -r FRAMES='/-\|'
+    local -r NUMBER_OR_FRAMES=${#FRAMES}
+    local -r CMDS="$2"
+    local -r MSG="$3"
+    local -r PID="$1"
+    local i=0
+    local frameText=""
+    if [ "$TRAVIS" != "true" ]; then
+      printf "\n\n\n"
+      tput cuu 3
+      tput sc
+    fi
+    while kill -0 "$PID" &>/dev/null; do
+      frameText="[ ${FRAMES:i++%NUMBER_OR_FRAMES:1} ] $MSG"
+      if [ "$TRAVIS" != "true" ]; then
+        printf "%s\n" "$frameText"
+      else
+        printf "%s" "$frameText"
+      fi
+      sleep 0.2
+      if [ "$TRAVIS" != "true" ]; then
+        tput rc
+      else
+        printf "\r"
+      fi
+    done
+  }
+  local -r CMDS="$1"
+  local -r MSG="${2:-$1}"
+  local -r TMP_FILE="$(mktemp /tmp/XXXXX)"
+  local exitCode=0
+  local cmdsPID=""
+  __set_trap "EXIT" "__kill_all_subprocesses"
+  eval "$CMDS" >/dev/null 2>"$TMP_FILE" &
+  cmdsPID=$!
+  __show_spinner "$cmdsPID" "$CMDS" "$MSG"
+  wait "$cmdsPID" &>/dev/null
+  exitCode=$?
+  __printf_execute_result $exitCode "$MSG"
+  if [ $exitCode -ne 0 ]; then
+    __printf_execute_error_stream <"$TMP_FILE"
+  fi
+  rm -rf "$TMP_FILE"
+  return $exitCode
+}
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-[[ "$1" == "--help" ]] && printf_exit "${GREEN}${SCRIPT_DESCRIBE} installer for $SCRIPT_OS"
-cat /etc/*-release | grep -E 'ID=|ID_LIKE=' | grep -qwE "$SCRIPT_OS" &>/dev/null && true || printf_exit "This installer is meant to be run on a $SCRIPT_OS based system"
+[[ "$1" == "--help" ]] && __printf_exit "${GREEN}${SCRIPT_DESCRIBE} installer for $SCRIPT_OS"
+grep -E -- 'ID=|ID_LIKE=' /etc/*-release | grep -qwE -- "$SCRIPT_OS" &>/dev/null && true || __printf_exit "This installer is meant to be run on a $SCRIPT_OS based system"
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-system_service_exists() { systemctl status "$1" 2>&1 | grep -iq "$1" && return 0 || return 1; }
-system_service_enable() { systemctl status "$1" 2>&1 | grep -iq 'inactive' && execute "systemctl enable $1" "Enabling service: $1" || return 1; }
-system_service_disable() { systemctl status "$1" 2>&1 | grep -iq 'active' && execute "systemctl disable --now $1" "Disabling service: $1" || return 1; }
+system_service_exists() { systemctl status "$1" 2>&1 | grep -iq -- "$1" && return 0 || return 1; }
+system_service_enable() { systemctl status "$1" 2>&1 | grep -iq -- 'inactive' && __execute "systemctl enable $1" "Enabling service: $1" || return 1; }
+system_service_disable() { systemctl status "$1" 2>&1 | grep -iq -- 'active' && __execute "systemctl disable --now $1" "Disabling service: $1" || return 1; }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 test_pkg() {
-  devnull sudo dpkg-query -l "$1" && printf_success "$1 is installed" && return 0 || return 1
-  setexitstatus
+  __devnull sudo dpkg-query -l "$1" && __printf_success "$1 is installed" && return 0 || return 1
+  __setexitstatus
   set --
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 remove_pkg() {
-  if test_pkg "$1"; then execute "sudo apt-get remove $1" "Removing: $1"; fi
-  setexitstatus
+  if test_pkg "$1"; then __execute "sudo apt-get remove $1" "Removing: $1"; fi
+  __setexitstatus
   set --
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 install_pkg() {
-  if ! test_pkg "$1"; then execute "sudo apt-get install $1" "Installing: $1"; fi
-  setexitstatus
+  if ! test_pkg "$1"; then __execute "sudo apt-get install $1" "Installing: $1"; fi
+  __setexitstatus
   set --
 }
 
@@ -73,10 +177,10 @@ detect_selinux() {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 disable_selinux() {
   if builtin command -v selinuxenabled &>/dev/null && selinuxenabled; then
-    printf_blue "Disabling selinux"
-    devnull setenforce 0
+    __printf_blue "Disabling selinux"
+    __devnull setenforce 0
   else
-    printf_green "selinux is already disabled"
+    __printf_green "selinux is already disabled"
   fi
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -85,52 +189,52 @@ ssh_key() {
   [ -n "$SSH_KEY_LOCATION" ] || return 0
   [ -d "$HOME/.ssh" ] || mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
-  printf_green "Grabbing ssh key[s]: $GITHUB_USER for $USER"
-  get_keys="$(curl -q -LSsf "$SSH_KEY_LOCATION" 2>/dev/null | grep '^' || false)"
+  __printf_green "Grabbing ssh key[s]: $GITHUB_USER for $USER"
+  get_keys="$(curl -q -LSsf "$SSH_KEY_LOCATION" 2>/dev/null | grep -- '^' || false)"
   if [ -n "$get_keys" ]; then
     echo "$get_keys" | while read -r key; do
-      if grep -qs "$key" "$HOME/.ssh/authorized_keys"; then
-        printf_cyan "${key:0:80} exists in ~/.ssh/authorized_keys"
+      if grep -qs -- "$key" "$HOME/.ssh/authorized_keys"; then
+        __printf_cyan "${key:0:80} exists in ~/.ssh/authorized_keys"
       else
         echo "$ssh_key" | tee -a "/root/.ssh/authorized_keys" &>/dev/null
-        printf_green "Successfully added github ${key:0:80}"
+        __printf_green "Successfully added github ${key:0:80}"
       fi
     done
   else
-    printf_return "Can not get key from $SSH_KEY_LOCATION"
+    __printf_return "Can not get key from $SSH_KEY_LOCATION"
     return 1
   fi
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-run_external() { printf_green "Executing $*" && eval "$*" >/dev/null 2>&1 || return 1; }
-grab_remote_file() { urlverify "$1" && curl -q -SLs "$1" || exit 1; }
-save_remote_file() { urlverify "$1" && curl -q -SLs "$1" | tee "$2" &>/dev/null || exit 1; }
+run_external() { __printf_green "Executing $*" && eval "$*" >/dev/null 2>&1 || return 1; }
+grab_remote_file() { __urlverify "$1" && curl -q -SLs "$1" || exit 1; }
+save_remote_file() { __urlverify "$1" && curl -q -SLs "$1" | tee "$2" &>/dev/null || exit 1; }
 retrieve_version_file() { grab_remote_file "https://github.com/casjay-base/debian/raw/main/version.txt" | head -n1 || echo "Unknown version"; }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 run_grub() {
-  printf_green "Setting up grub"
+  __printf_green "Setting up grub"
   rm -Rf /boot/*rescue*
-  devnull grub2-mkconfig -o /boot/grub2/grub.cfg
+  __devnull grub2-mkconfig -o /boot/grub2/grub.cfg
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 run_post() {
   local e="$*"
-  local m="${e//devnull /}"
-  execute "$e" "executing: $m"
-  setexitstatus
+  local m="${e//__devnull /}"
+  __execute "$e" "executing: $m"
+  __setexitstatus
   set --
 }
 ##################################################################################################################
 clear
 ARGS="$*" && shift $#
 ##################################################################################################################
-printf_head "Initializing the installer"
+__printf_head "Initializing the installer"
 ##################################################################################################################
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 if [ -f /etc/casjaysdev/updates/versions/default.txt ]; then
-  printf_red "This has already been installed"
-  printf_red "To reinstall please remove the version file in"
-  printf_exit "/etc/casjaysdev/updates/versions/default.txt"
+  __printf_red "This has already been installed"
+  __printf_red "To reinstall please remove the version file in"
+  __printf_exit "/etc/casjaysdev/updates/versions/default.txt"
 fi
 if ! builtin type -P systemmgr &>/dev/null; then
   if [[ -d "/usr/local/share/CasjaysDev/scripts" ]]; then
@@ -143,18 +247,18 @@ if ! builtin type -P systemmgr &>/dev/null; then
   run_external systemmgr install scripts
   run_update
 fi
-printf_green "Installer has been initialized"
+__printf_green "Installer has been initialized"
 
 ##################################################################################################################
-printf_head "Disabling selinux"
+__printf_head "Disabling selinux"
 ##################################################################################################################
 disable_selinux
 
 ##################################################################################################################
-printf_head "Configuring cores for compiling"
+__printf_head "Configuring cores for compiling"
 ##################################################################################################################
 numberofcores=$(grep -c ^processor /proc/cpuinfo)
-printf_yellow "Total cores avaliable: $numberofcores"
+__printf_yellow "Total cores avaliable: $numberofcores"
 if [ -f /etc/makepkg.conf ]; then
   if [ $numberofcores -gt 1 ]; then
     sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j'$(($numberofcores + 1))'"/g' /etc/makepkg.conf
@@ -162,12 +266,12 @@ if [ -f /etc/makepkg.conf ]; then
   fi
 fi
 ##################################################################################################################
-printf_head "Grabbing ssh key from github"
+__printf_head "Grabbing ssh key from github"
 ##################################################################################################################
 ssh_key
 
 ##################################################################################################################
-printf_head "Configuring the system"
+__printf_head "Configuring the system"
 ##################################################################################################################
 run_external apt clean
 run_external apt update
@@ -196,7 +300,7 @@ run_external apt upgrade -y
 run_grub
 
 ##################################################################################################################
-printf_head "Installing the packages for $SCRIPT_DESCRIBE"
+__printf_head "Installing the packages for $SCRIPT_DESCRIBE"
 ##################################################################################################################
 install_pkg adduser
 install_pkg adwaita-icon-theme
@@ -832,7 +936,7 @@ install_pkg zsh
 install_pkg zsh-common
 
 ##################################################################################################################
-printf_head "setting up config files"
+__printf_head "setting up config files"
 ##################################################################################################################
 run_post "dfmgr install asciinema"
 run_post "dfmgr install castero"
@@ -876,7 +980,7 @@ run_post "systemmgr install samba"
 run_post "systemmgr install tor"
 
 ##################################################################################################################
-printf_head "Setting up services"
+__printf_head "Setting up services"
 ##################################################################################################################
 system_service_enable tor.service
 system_service_enable smbd.service
@@ -886,11 +990,11 @@ system_service_enable avahi-daemon.service
 system_service_disable mpd.service
 
 ##################################################################################################################
-printf_head "Cleaning up"
+__printf_head "Cleaning up"
 ##################################################################################################################
 
 ##################################################################################################################
-printf_head "Finished "
+__printf_head "Finished "
 echo ""
 ##################################################################################################################
 
