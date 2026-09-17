@@ -156,8 +156,8 @@ __execute() {
 grep -E -- 'ID=|ID_LIKE=' /etc/*-release | grep -qwE -- "$SCRIPT_OS" &>/dev/null && true || __printf_exit "This installer is meant to be run on a $SCRIPT_OS based system"
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 system_service_exists() { systemctl status "$1" 2>&1 | grep -iq -- "$1" && return 0 || return 1; }
-system_service_enable() { systemctl is-enabled --quiet "$1" 2>/dev/null || __execute "systemctl enable $1" "Enabling service: $1" || return 1; }
-system_service_disable() { systemctl status "$1" 2>&1 | grep -iq -- 'active' && __execute "systemctl disable --now $1" "Disabling service: $1" || return 1; }
+__system_service_enable() { systemctl is-enabled --quiet "$1" 2>/dev/null || __execute "systemctl enable $1" "Enabling service: $1" || return 1; }
+__system_service_disable() { systemctl status "$1" 2>&1 | grep -iq -- 'active' && __execute "systemctl disable --now $1" "Disabling service: $1" || return 1; }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 test_pkg() {
   __devnull sudo dpkg-query -l "$1" && __printf_success "$1 is installed" && return 0 || return 1
@@ -171,7 +171,7 @@ remove_pkg() {
   set --
 }
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-install_pkg() {
+__install_pkg() {
   if ! test_pkg "$1"; then __execute "sudo apt-get install $1" "Installing: $1"; fi
   __setexitstatus
   set --
@@ -298,17 +298,17 @@ ssh_key
 __printf_head "Configuring the system"
 ##################################################################################################################
 run_update
-install_pkg vnstat
-system_service_enable vnstat
-install_pkg net-tools
-install_pkg wget
-install_pkg curl
-install_pkg git
-install_pkg nail
-install_pkg e2fsprogs
-install_pkg lsb-release
-install_pkg neovim
-install_pkg unzip
+__install_pkg vnstat
+__system_service_enable vnstat
+__install_pkg net-tools
+__install_pkg wget
+__install_pkg curl
+__install_pkg git
+__install_pkg nail
+__install_pkg e2fsprogs
+__install_pkg lsb-release
+__install_pkg neovim
+__install_pkg unzip
 run_external rm -Rf /tmp/dotfiles
 run_external timedatectl set-timezone America/New_York
 run_update
@@ -317,7 +317,7 @@ run_grub
 ##################################################################################################################
 __printf_head "Installing the packages for $SCRIPT_DESCRIBE"
 ##################################################################################################################
-install_pkg build-essential
+__install_pkg build-essential
 
 ##################################################################################################################
 __printf_head "Fixing packages"
@@ -346,12 +346,12 @@ run_post "dfmgr install vim"
 ##################################################################################################################
 __printf_head "Setting up services"
 ##################################################################################################################
-system_service_enable tor.service
+__system_service_enable tor.service
 
 ##################################################################################################################
 __printf_head "Cleaning up"
 ##################################################################################################################
-system_service_enable nginx
+__system_service_enable nginx
 /root/bin/changeip.sh >/dev/null 2>&1
 mkdir -p /mnt/backups /var/www/html/.well-known /etc/letsencrypt/live
 
